@@ -15,6 +15,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
+    phone_number = Column(String(32), unique=True, nullable=True, index=True)
     pin_hash = Column(String(128), nullable=False, default="")
     avatar_url = Column(String(255), nullable=False, default="/static/assets/default-avatar.svg")
     created_at = Column(DateTime, default=datetime.utcnow)

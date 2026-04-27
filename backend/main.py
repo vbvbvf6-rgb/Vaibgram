@@ -55,6 +55,38 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to prevent common web attacks"""
+    
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Prevent XSS attacks
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        
+        # Prevent clickjacking
+        response.headers["Content-Security-Policy"] = "default-src 'self' https: wss: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; font-src 'self' https:; connect-src 'self' https: wss:;"
+        
+        # HSTS (if HTTPS is used)
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        
+        # Prevent MIME type sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        
+        # Referrer policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        # Disable caching for sensitive data
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        
+        return response
+
+
 def _ensure_user_columns():
     # Lightweight startup migration for existing SQLite databases.
     with engine.connect() as conn:
@@ -62,6 +94,8 @@ def _ensure_user_columns():
         columns = {row[1] for row in rows}
         if "pin_hash" not in columns:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN pin_hash VARCHAR(128) NOT NULL DEFAULT ''")
+        if "phone_number" not in columns:
+            conn.exec_driver_sql("ALTER TABLE users ADD COLUMN phone_number VARCHAR(32)")
         if "last_active_at" not in columns:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN last_active_at DATETIME")
         if "twofa_enabled" not in columns:
@@ -74,6 +108,10 @@ def _ensure_user_columns():
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN banned_at DATETIME")
         if "banned_reason" not in columns:
             conn.exec_driver_sql("ALTER TABLE users ADD COLUMN banned_reason VARCHAR(255)")
+        try:
+            conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_phone_number ON users (phone_number)")
+        except Exception:
+            pass
         # Fill null values in legacy DB rows.
         conn.exec_driver_sql("UPDATE users SET pin_hash = ? WHERE pin_hash = '' OR pin_hash IS NULL", (hash_pin("00000"),))
         conn.exec_driver_sql(
@@ -98,9 +136,12 @@ _ensure_user_columns()
 _ensure_room_columns()
 ensure_default_room()
 
-app = FastAPI(title="DrOidgram API")
+app = FastAPI(title="Vaibgram API")
 
-# Add rate limiting middleware before CORS
+# Add security middleware
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Add rate limiting middleware
 app.add_middleware(RateLimitMiddleware)
 
 app.add_middleware(

@@ -206,6 +206,7 @@ def register_socket_handlers(sio):
         attachment_name = data.get("attachment_name")
         attachment_url = data.get("attachment_url")
         attachment_type = data.get("attachment_type")
+        client_temp_id = data.get("client_temp_id")
 
         if not room_id or (not content and not attachment_url):
             return
@@ -278,6 +279,7 @@ def register_socket_handlers(sio):
                     "attachment_type": msg.attachment_type,
                     "created_at": msg.created_at.isoformat(),
                     "status": "sent",
+                    "client_temp_id": client_temp_id,
                 },
                 room=f"room:{room_id}",
             )
@@ -356,6 +358,7 @@ def register_socket_handlers(sio):
                     "user_id": user.id,
                     "username": user.username,
                     "avatar_url": user.avatar_url,
+                    "phone_number": user.phone_number,
                 },
                 room="global",
             )

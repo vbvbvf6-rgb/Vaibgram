@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DrOidgram</title>
+  <title>Vaibgram</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -16,10 +16,12 @@
 
   <div id="authModal" class="auth-modal">
     <div class="auth-card glass">
-      <h1>DrOidgram</h1>
+      <h1>Vaibgram</h1>
       <p>Войдите или зарегистрируйтесь по имени пользователя</p>
+      <button id="qrLoginBtn" class="btn secondary">Войти по QR</button>
       <div class="auth-row">
         <input id="usernameInput" type="text" placeholder="Введите username..." maxlength="32" />
+        <small style="color: var(--muted); font-size: 12px;">Рекомендуем использовать имя ник на английском</small>
       </div>
       <div class="auth-row">
         <input id="pinInput" type="password" placeholder="PIN (5 цифр)" maxlength="5" inputmode="numeric" />
@@ -35,12 +37,67 @@
     </div>
   </div>
 
+  <div id="qrModal" class="auth-modal hidden">
+    <div class="auth-card glass">
+      <h1>Вход по QR</h1>
+      <p>Отсканируйте QR-код с мобильного устройства</p>
+      <div id="qrCodeContainer"></div>
+      <button id="closeQrBtn" class="btn">Закрыть</button>
+    </div>
+  </div>
+
+  <div id="createRoomModal" class="auth-modal hidden">
+    <div class="auth-card glass">
+      <h1>Создать комнату</h1>
+      <div class="auth-row">
+        <input id="roomNameInput" type="text" placeholder="Название комнаты..." maxlength="64" />
+      </div>
+      <div class="auth-actions">
+        <button id="createRoomConfirmBtn" class="btn primary">Создать</button>
+        <button id="closeRoomBtn" class="btn">Отмена</button>
+      </div>
+      <div id="roomError" class="auth-error"></div>
+    </div>
+  </div>
+  <div id="messageModal" class="auth-modal hidden">
+    <div class="auth-card glass message-modal-card">
+      <h1>Vaibgram</h1>
+      <p id="messageModalText">...</p>
+      <div class="auth-actions">
+        <button id="closeMessageBtn" class="btn primary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="dialogModal" class="auth-modal hidden">
+    <div class="auth-card glass message-modal-card">
+      <h1 id="dialogModalTitle">Подтвердите</h1>
+      <p id="dialogModalText">...</p>
+      <div class="auth-row">
+        <input id="dialogModalInput" type="text" placeholder="" />
+      </div>
+      <div class="auth-actions">
+        <button id="dialogConfirmBtn" class="btn primary">OK</button>
+        <button id="dialogCancelBtn" class="btn">Отмена</button>
+      </div>
+    </div>
+  </div>
+  <div id="messageModal" class="auth-modal hidden">
+    <div class="auth-card glass message-modal-card">
+      <h1>Vaibgram</h1>
+      <p id="messageModalText">...</p>
+      <div class="auth-actions">
+        <button id="closeMessageBtn" class="btn primary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <div id="app" class="layout hidden">
     <aside class="sidebar glass">
       <div class="brand">
-        <div class="logo"><i class="fa-solid fa-robot"></i></div>
+        <img id="currentUserAvatar" class="brand-avatar" src="/static/assets/default-avatar.svg" alt="">
         <div>
-          <h2>DrOidgram</h2>
+          <h2>Vaibgram</h2>
           <small id="currentUserLabel">...</small>
         </div>
       </div>
@@ -94,6 +151,10 @@
       <footer class="chat-input-wrap">
         <input id="fileInput" type="file" hidden />
         <button id="attachBtn" class="icon-btn"><i class="fa-solid fa-paperclip"></i></button>
+        <div id="attachmentPreview" class="attachment-preview hidden">
+          <div id="attachmentPreviewBody" class="attachment-preview-body"></div>
+          <button id="clearAttachmentPreviewBtn" class="icon-btn" type="button"><i class="fa-solid fa-xmark"></i></button>
+        </div>
         <input id="messageInput" type="text" placeholder="Напишите сообщение..." />
         <button id="sendBtn" class="send-btn"><i class="fa-solid fa-paper-plane"></i></button>
       </footer>
@@ -157,10 +218,13 @@
         </div>
         <label class="field-label">Имя пользователя</label>
         <input id="settingsUsernameInput" type="text" maxlength="32" />
+        <label class="field-label mt">Номер телефона (необязательно)</label>
+        <input id="settingsPhoneInput" type="text" maxlength="32" placeholder="+7 999 123-45-67" />
         <div class="settings-actions">
           <button id="saveSettingsBtn" class="btn primary">Сохранить</button>
           <button id="addAccountBtn" class="btn">Добавить аккаунт</button>
           <button id="logoutBtn" class="btn danger">Выйти из аккаунта</button>
+          <button id="deleteAccountBtn" class="btn danger">Удалить аккаунт</button>
         </div>
         <label class="field-label mt">2FA (Google Authenticator / Authy)</label>
         <div class="settings-actions">
@@ -173,6 +237,33 @@
         <label class="field-label mt">Аккаунты на этом устройстве</label>
         <div id="accountsList" class="list account-list"></div>
         <div id="settingsError" class="auth-error"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="userProfileModal" class="overlay hidden">
+    <div class="settings-card glass">
+      <div class="settings-header">
+        <h3>Профиль пользователя</h3>
+        <button id="closeUserProfileBtn" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="settings-content">
+        <div class="user-profile-preview">
+          <img id="userProfileAvatar" class="avatar-xl" src="/static/assets/default-avatar.svg" alt="">
+        </div>
+        <label class="field-label">Настоящий ник</label>
+        <div id="userProfileUsername" class="profile-value">@unknown</div>
+        <div id="userProfilePhoneWrap" class="hidden">
+          <label class="field-label mt">Номер телефона</label>
+          <div id="userProfilePhone" class="profile-value">-</div>
+        </div>
+        <div id="userProfileAliasWrap" class="hidden">
+          <label class="field-label mt">Ваше локальное имя</label>
+          <div id="userProfileAlias" class="profile-value">-</div>
+        </div>
+        <div class="settings-actions">
+          <button id="openProfileChatBtn" class="btn primary">Открыть чат</button>
+        </div>
       </div>
     </div>
   </div>
@@ -214,6 +305,7 @@
   </audio>
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="/static/encryption.js"></script>
   <script src="/static/p2p.js"></script>
   <script src="/static/p2p-db.js"></script>
   <script src="/static/script.js"></script>

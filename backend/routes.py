@@ -6,13 +6,18 @@ import os
 import shutil
 import hashlib
 import pyotp
+import qrcode
+import base64
+import re
+import html
+from io import BytesIO
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -47,6 +52,7 @@ class CreateDirectRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     username: str = Field(min_length=2, max_length=32)
+    phone_number: Optional[str] = Field(default=None, max_length=32)
 
 
 class CreateGroupRoomRequest(BaseModel):
@@ -105,6 +111,54 @@ def validate_pin(pin: str) -> bool:
 
 def validate_otp(otp: str) -> bool:
     return otp.isdigit() and len(otp) == 6
+
+
+def sanitize_username(username: str) -> str:
+    """Sanitize username to prevent XSS and injection attacks"""
+    username = username.strip()
+    # Remove HTML/script tags
+    username = html.escape(username)
+    # Allow only alphanumeric, underscore, hyphen, and dot
+    username = re.sub(r'[^a-zA-Z0-9_\-\.]', '', username)
+    return username[:32]  # Max 32 chars
+
+
+def sanitize_content(content: str) -> str:
+    """Sanitize message content"""
+    content = content.strip()
+    # Escape HTML entities to prevent XSS
+    content = html.escape(content)
+    return content
+
+
+def validate_username(username: str) -> bool:
+    """Validate username format"""
+    if not username or not isinstance(username, str):
+        return False
+    username = username.strip()
+    # Check length
+    if len(username) < 2 or len(username) > 32:
+        return False
+    # Allow alphanumeric, underscore, hyphen, dot
+    if not re.match(r'^[a-zA-Z0-9_\-\.]+$', username):
+        return False
+    return True
+
+
+def normalize_phone_number(phone_number: Optional[str]) -> Optional[str]:
+    if phone_number is None:
+        return None
+    phone = re.sub(r"[^\d+]", "", phone_number.strip())
+    if not phone:
+        return None
+    if phone.startswith("+"):
+        digits = phone[1:]
+        normalized = f"+{digits}"
+    else:
+        normalized = phone
+    if len(re.sub(r"\D", "", normalized)) < 7 or len(re.sub(r"\D", "", normalized)) > 15:
+        raise HTTPException(status_code=400, detail="Phone number must contain 7-15 digits")
+    return normalized
 
 
 def get_current_user(
@@ -227,11 +281,18 @@ def ensure_default_room():
 @router.post("/register")
 def register(payload: AuthRequest, db: Session = Depends(get_db)):
     username = payload.username.strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="Username is required")
+    
+    # Validate username
+    if not validate_username(username):
+        raise HTTPException(status_code=400, detail="Invalid username format. Use 2-32 alphanumeric characters, underscore, hyphen, or dot")
+    
+    # Sanitize username
+    username = sanitize_username(username)
+    
     exists = db.query(User).filter(User.username == username).first()
     if exists:
         raise HTTPException(status_code=400, detail="Username already exists")
+    
     if not validate_pin(payload.pin):
         raise HTTPException(status_code=400, detail="PIN must contain exactly 5 digits")
 
@@ -274,26 +335,52 @@ def login(payload: AuthRequest, db: Session = Depends(get_db)):
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
-    return {"id": user.id, "username": user.username, "avatar_url": user.avatar_url}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "avatar_url": user.avatar_url,
+        "phone_number": user.phone_number,
+    }
 
 
 @router.get("/settings")
 def get_settings(user: User = Depends(get_current_user)):
-    return {"id": user.id, "username": user.username, "avatar_url": user.avatar_url}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "avatar_url": user.avatar_url,
+        "phone_number": user.phone_number,
+    }
 
 
 @router.put("/settings")
 def update_settings(payload: UpdateProfileRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     username = payload.username.strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="Username is required")
+    phone_number = normalize_phone_number(payload.phone_number)
+    
+    # Validate and sanitize username
+    if not validate_username(username):
+        raise HTTPException(status_code=400, detail="Invalid username format. Use 2-32 alphanumeric characters, underscore, hyphen, or dot")
+    
+    username = sanitize_username(username)
+    
     duplicate = db.query(User).filter(User.username == username, User.id != user.id).first()
     if duplicate:
         raise HTTPException(status_code=400, detail="Username already exists")
+    if phone_number:
+        duplicate_phone = db.query(User).filter(User.phone_number == phone_number, User.id != user.id).first()
+        if duplicate_phone:
+            raise HTTPException(status_code=400, detail="Phone number already linked to another account")
     user.username = username
+    user.phone_number = phone_number
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "username": user.username, "avatar_url": user.avatar_url}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "avatar_url": user.avatar_url,
+        "phone_number": user.phone_number,
+    }
 
 
 @router.post("/settings/avatar")
@@ -335,7 +422,7 @@ def twofa_setup(user: User = Depends(get_current_user), db: Session = Depends(ge
     user.twofa_enabled = False
     db.commit()
     db.refresh(user)
-    uri = pyotp.TOTP(secret).provisioning_uri(name=user.username, issuer_name="DrOidgram")
+    uri = pyotp.TOTP(secret).provisioning_uri(name=user.username, issuer_name="Vaibgram")
     return {"secret": secret, "otpauth_uri": uri}
 
 
@@ -401,6 +488,7 @@ def list_users(user: User = Depends(get_current_user), db: Session = Depends(get
             "id": u.id,
             "username": u.username,
             "avatar_url": u.avatar_url,
+            "phone_number": u.phone_number,
             "is_online": u.is_online,
             "is_friend": u.id in friends_ids,
             "request_outgoing": u.id in outgoing_ids,
@@ -442,6 +530,24 @@ def friend_requests(user: User = Depends(get_current_user), db: Session = Depend
         }
 
     return {"incoming": [_pack(req) for req in incoming], "outgoing": [_pack(req) for req in outgoing]}
+
+
+@router.get("/qr-login")
+def generate_qr_login():
+    # Generate a temporary token for QR login
+    token = hashlib.sha256(os.urandom(32)).hexdigest()
+    # In a real app, store this token temporarily, e.g., in Redis with expiration
+    # For demo, just return a URL
+    url = f"https://yourdomain.com/login?token={token}"
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill='black', back_color='white')
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    qr_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+    return {"qr_base64": f"data:image/png;base64,{qr_base64}", "token": token}
 
 
 @router.post("/friends/request")
