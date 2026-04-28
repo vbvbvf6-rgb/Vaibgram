@@ -1586,6 +1586,8 @@ async function confirmDeleteAccount() {
   if (!confirmed) return;
   try {
     await request("/account", { method: "DELETE", headers: authHeaders() });
+    const accounts = getStoredAccounts().filter((acc) => acc.token !== state.token);
+    saveStoredAccounts(accounts);
     showMessageModal("Аккаунт удалён. Перезагрузка...");
     logout();
   } catch (e) {

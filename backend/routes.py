@@ -383,6 +383,37 @@ def update_settings(payload: UpdateProfileRequest, user: User = Depends(get_curr
     }
 
 
+@router.delete("/account")
+def delete_account(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Remove uploaded avatar file if present
+    if user.avatar_url and user.avatar_url.startswith("/static/uploads/"):
+        avatar_path = user.avatar_url.replace("/static/", "static/")
+        if os.path.exists(avatar_path):
+            os.remove(avatar_path)
+
+    # Remove attachments from user's messages
+    user_messages = db.query(Message).filter(Message.user_id == user.id).all()
+    for msg in user_messages:
+        if msg.attachment_url and msg.attachment_url.startswith("/static/uploads/"):
+            file_path = msg.attachment_url.replace("/static/", "static/")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+    # Clean up related data
+    db.query(MessageRead).filter(MessageRead.user_id == user.id).delete(synchronize_session=False)
+    db.query(RoomMember).filter(RoomMember.user_id == user.id).delete(synchronize_session=False)
+    db.query(FriendRequest).filter(
+        or_(FriendRequest.sender_id == user.id, FriendRequest.receiver_id == user.id)
+    ).delete(synchronize_session=False)
+    db.query(UserChatSetting).filter(
+        or_(UserChatSetting.owner_id == user.id, UserChatSetting.target_user_id == user.id)
+    ).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/settings/avatar")
 async def update_avatar(
     user: User = Depends(get_current_user),
